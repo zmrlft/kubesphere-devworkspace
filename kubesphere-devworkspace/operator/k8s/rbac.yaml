@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: devworkspace-operator
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: devworkspace-operator
+rules:
+  # 允许访问 WorkspaceTemplate 和 WorkspaceInstance 资源
+  - apiGroups: ["devworkspace.kubesphere.io"]
+    resources: ["workspacetemplates", "workspaceinstances"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # 允许访问 WorkspaceInstance 的状态子资源
+  - apiGroups: ["devworkspace.kubesphere.io"]
+    resources: ["workspaceinstances/status"]
+    verbs: ["get", "update", "patch"]
+  
+  # 允许访问核心资源
+  - apiGroups: [""]
+    resources: ["pods", "services", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # 允许访问事件
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: devworkspace-operator
+subjects:
+  - kind: ServiceAccount
+    name: devworkspace-operator
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: devworkspace-operator
+  apiGroup: rbac.authorization.k8s.io 

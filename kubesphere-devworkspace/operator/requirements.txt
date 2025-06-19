@@ -1,0 +1,5 @@
+kopf==1.35.6
+kubernetes==26.1.0
+pykube-ng==22.9.0
+pyyaml==6.0
+jinja2==3.1.2 

@@ -1,0 +1,22 @@
+apiVersion: devworkspace.kubesphere.io/v1alpha1
+kind: WorkspaceTemplate
+metadata:
+  name: nodejs-16
+spec:
+  displayName: "Node.js 16"
+  description: "A standard Node.js 16 environment with npm and yarn."
+  environment:
+    image: "codercom/code-server:4.9.1"  # 使用公开可用的镜像用于测试
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  storage:
+    size: "10Gi"
+  ports:
+    - name: http
+      containerPort: 8080
+      protocol: TCP 

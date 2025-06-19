@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devworkspace-operator
+  namespace: kube-system
+  labels:
+    app: devworkspace-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devworkspace-operator
+  template:
+    metadata:
+      labels:
+        app: devworkspace-operator
+    spec:
+      serviceAccountName: devworkspace-operator
+      containers:
+        - name: operator
+          image: kubesphere/devworkspace-operator:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi" 

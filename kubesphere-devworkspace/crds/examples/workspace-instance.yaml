@@ -1,0 +1,11 @@
+apiVersion: devworkspace.kubesphere.io/v1alpha1
+kind: WorkspaceInstance
+metadata:
+  name: my-nodejs-workspace
+  namespace: default
+spec:
+  templateRef: nodejs-16
+  overrides:
+    resources:
+      limits:
+        memory: "6Gi" 

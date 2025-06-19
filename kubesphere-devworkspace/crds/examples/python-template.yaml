@@ -1,0 +1,22 @@
+apiVersion: devworkspace.kubesphere.io/v1alpha1
+kind: WorkspaceTemplate
+metadata:
+  name: python-3.9
+spec:
+  displayName: "Python 3.9"
+  description: "A standard Python 3.9 environment with pip and venv."
+  environment:
+    image: "codercom/code-server:4.9.1"  # 使用公开可用的镜像用于测试
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+  storage:
+    size: "5Gi"
+  ports:
+    - name: http
+      containerPort: 8080
+      protocol: TCP 
