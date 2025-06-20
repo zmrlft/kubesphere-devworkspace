@@ -38,3 +38,9 @@ package-lock.json
 .env.production.local
 .history/
 coverage/ 
+
+#specstory-vscode
+.specstory/
+
+#
+8080

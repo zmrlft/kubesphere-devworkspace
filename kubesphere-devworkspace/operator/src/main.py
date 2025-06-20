@@ -23,11 +23,11 @@ logger = logging.getLogger("devworkspace-operator")
 
 # 尝试加载 Kubernetes 配置
 try:
-    config.load_incluster_config()
+    config.load_incluster_config()#如果代码在集群内部运行
     logger.info("Running inside Kubernetes cluster, using in-cluster config")
 except config.ConfigException:
     try:
-        config.load_kube_config()
+        config.load_kube_config()#如果代码在集群外部运行
         logger.info("Running outside Kubernetes cluster, using kubeconfig")
     except config.ConfigException:
         logger.error("Could not configure kubernetes client")
@@ -578,6 +578,5 @@ def main():
     """
     logger.info("Starting KubeSphere DevWorkspace Operator")
     kopf.run()
-
 if __name__ == "__main__":
     main() 
