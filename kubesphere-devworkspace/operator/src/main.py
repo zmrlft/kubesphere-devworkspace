@@ -4,18 +4,21 @@ KubeSphere DevWorkspace Operator
 
 该 Operator 负责监听 WorkspaceInstance 资源的创建、更新和删除事件，
 并根据引用的 WorkspaceTemplate 创建相应的 Pod、PVC 和 Service 资源。
+
+注意: 本文件中的 kopf 处理函数使用 **kwargs 参数形式，这可能导致 linter 报告类型检查错误。
+这些错误可以被忽略，因为实际运行时 kopf 1.35.6 会正确传递所需的参数。
 """
 
-import os
+
 import kopf
 import logging
-import yaml
+
 import time
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
-from pykube import HTTPClient, KubeConfig, object_factory
-from typing import Dict, Any, Optional
-import json
+
+from typing import Dict, Any, Optional, cast
+
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -41,28 +44,28 @@ custom_api = client.CustomObjectsApi(api_client)
 # 定义 API 版本和资源组
 API_GROUP = "devworkspace.kubesphere.io"
 API_VERSION = "v1alpha1"
-WORKSPACE_TEMPLATE_KIND = "WorkspaceTemplate"
-WORKSPACE_INSTANCE_KIND = "WorkspaceInstance"
+DEV_WORKSPACE_TEMPLATE_KIND = "DevWorkspaceTemplate"
+DEV_WORKSPACE_KIND = "DevWorkspace"
 
 def get_workspace_template(name: str) -> Optional[Dict[str, Any]]:
     """
-    获取指定名称的 WorkspaceTemplate 资源
+    获取指定名称的 DevWorkspaceTemplate 资源
     
     Args:
-        name: WorkspaceTemplate 的名称
+        name: DevWorkspaceTemplate 的名称
         
     Returns:
-        WorkspaceTemplate 资源对象，如果找不到则返回 None
+        DevWorkspaceTemplate 资源对象，如果找不到则返回 None
     """
     try:
         template = custom_api.get_cluster_custom_object(
             group=API_GROUP,
             version=API_VERSION,
-            plural="workspacetemplates",
+            plural="devworkspacetemplates",
             name=name
         )
         logger.info(f"Found template: {name}")
-        return template
+        return cast(Dict[str, Any], template)
     except ApiException as e:
         if e.status == 404:
             logger.error(f"Template {name} not found")
@@ -118,7 +121,7 @@ def create_pvc(instance_name: str, namespace: str, storage_size: str) -> str:
     Returns:
         创建的 PVC 的名称
     """
-    pvc_name = f"{instance_name}-workspace"
+    pvc_name = f"{instance_name}-workspacePVC"
     
     pvc_manifest = {
         "apiVersion": "v1",
@@ -145,7 +148,7 @@ def create_pvc(instance_name: str, namespace: str, storage_size: str) -> str:
         logger.info(f"Created PVC: {pvc_name}")
         return pvc_name
     except ApiException as e:
-        if e.status == 409:  # Already exists
+        if e.status == 409:  # Already exists 参考链接：https://cloud.tencent.com/developer/ask/sof/106389732
             logger.info(f"PVC {pvc_name} already exists")
             return pvc_name
         else:
@@ -314,13 +317,17 @@ def get_service_url(service_name: str, namespace: str) -> str:
                 name=service_name,
                 namespace=namespace
             )
-            cluster_ip = service.spec.cluster_ip
-            if cluster_ip:
-                port = service.spec.ports[0].port
-                logger.info(f"Service {service_name} has ClusterIP {cluster_ip}")
-                return f"http://{cluster_ip}:{port}"
+            # 使用类型检查和安全访问
+            if service and isinstance(service, client.V1Service):
+                if service.spec and service.spec.cluster_ip:
+                    port = service.spec.ports[0].port
+                    logger.info(f"Service {service_name} has ClusterIP {service.spec.cluster_ip}")
+                    return f"http://{service.spec.cluster_ip}:{port}"
+                else:
+                    logger.info(f"Service {service_name} does not have a ClusterIP yet. Retrying... ({i+1}/{retries})")
+                    time.sleep(delay)
             else:
-                logger.info(f"Service {service_name} does not have a ClusterIP yet. Retrying... ({i+1}/{retries})")
+                logger.info(f"Service {service_name} is not properly initialized. Retrying... ({i+1}/{retries})")
                 time.sleep(delay)
         except ApiException as e:
             logger.error(f"Error getting service {service_name}: {e}. Retrying... ({i+1}/{retries})")
@@ -329,63 +336,57 @@ def get_service_url(service_name: str, namespace: str) -> str:
     logger.error(f"Failed to get ClusterIP for service {service_name} after {retries} retries.")
     return "Unknown"
 
-@kopf.on.create('devworkspace.kubesphere.io', 'v1alpha1', 'workspaceinstances')
-def create_workspace_instance(spec, meta, status, name, namespace, logger, **kwargs):
+def _get_workspace_config(spec: Dict[str, Any], logger: logging.Logger) -> Optional[Dict[str, Any]]:
     """
-    处理 WorkspaceInstance 的创建事件
+    辅助函数：获取并合并工作空间配置
     """
-    logger.info(f"Creating workspace instance: {name} in namespace {namespace}")
-    
-    # 立即设置一个初始状态，表示正在处理
-    patch_status(name, namespace, {"phase": "Provisioning", "message": "Creating resources..."})
-
-    # 获取模板引用
     template_ref = spec.get('templateRef')
     if not template_ref:
-        message = "No templateRef specified"
-        patch_status(name, namespace, {"phase": "Failed", "message": message})
-        return {"message": message}
+        logger.error("No templateRef specified")
+        return None
     
-    # 获取模板
     template = get_workspace_template(template_ref)
     if not template:
-        message = f"Template {template_ref} not found"
-        patch_status(name, namespace, {"phase": "Failed", "message": message})
-        return {"message": message}
+        logger.error(f"Template {template_ref} not found")
+        return None
     
-    # 合并配置
     template_spec = template.get('spec', {})
     overrides = spec.get('overrides', {})
     config = merge_configs(template_spec, overrides)
     
+    if not config.get('environment', {}).get('image'):
+        logger.error("No image specified in template")
+        return None
+        
+    return config
+
+@kopf.on.create(DEV_WORKSPACE_KIND.lower() + "s", group=API_GROUP, version=API_VERSION)
+def create_workspace_instance(body: Dict[str, Any], name: str, namespace: str, logger: logging.Logger, **kwargs):
+    """
+    处理 DevWorkspace 的创建事件
+    """
+    logger.info(f"Creating devworkspace: {name} in namespace {namespace}")
+    patch_status(name, namespace, {"phase": "Provisioning", "message": "Creating resources..."})
+
+    config = _get_workspace_config(body.get('spec', {}), logger)
+    if not config:
+        patch_status(name, namespace, {"phase": "Failed", "message": "Failed to get workspace config"})
+        return
+
     # 获取配置参数
     image = config.get('environment', {}).get('image')
-    if not image:
-        message = "No image specified in template"
-        patch_status(name, namespace, {"phase": "Failed", "message": message})
-        return {"message": message}
-    
     resources = config.get('resources', {})
     storage_size = config.get('storage', {}).get('size', '10Gi')
     ports = config.get('ports', [])
     
     try:
-        # 创建 PVC
         pvc_name = create_pvc(name, namespace, storage_size)
-        
-        # 创建 Pod
         pod_name = create_pod(name, namespace, pvc_name, image, resources, ports)
-        
-        # 创建 Service
         service_name = create_service(name, namespace, ports)
 
-        # 检查 Pod 是否运行
         wait_for_pod_running(pod_name, namespace, logger)
-        
-        # 获取服务 URL (现在带有重试逻辑)
         url = get_service_url(service_name, namespace)
         
-        # 更新最终状态
         final_status = {
             "phase": "Running",
             "message": "Workspace is ready",
@@ -398,93 +399,100 @@ def create_workspace_instance(spec, meta, status, name, namespace, logger, **kwa
         logger.info(f"Workspace instance {name} is running at {url}")
 
     except kopf.TemporaryError as e:
-        # If waiting times out, Kopf will automatically retry.
-        # Let the exception propagate after patching the status.
         message = f"Failed to create workspace, will retry: {e}"
         patch_status(name, namespace, {"phase": "Provisioning", "message": message})
         raise
     except Exception as e:
-        # For other unrecoverable errors, set the status to Failed.
-        logger.error(f"Failed to create workspace instance {name}: {e}", exc_info=True)
+        logger.error(f"Failed to create devworkspace {name}: {e}", exc_info=True)
         message = f"An unexpected error occurred: {e}"
         patch_status(name, namespace, {"phase": "Failed", "message": message})
 
-@kopf.on.update('devworkspace.kubesphere.io', 'v1alpha1', 'workspaceinstances')
-def update_workspace_instance(spec, meta, status, name, namespace, logger, **kwargs):
+@kopf.on.update(DEV_WORKSPACE_KIND.lower() + "s", group=API_GROUP, version=API_VERSION)
+def update_workspace_instance(body: Dict[str, Any], name: str, namespace: str, status: Dict[str, Any], logger: logging.Logger, diff: kopf.Diff, **kwargs):
     """
-    处理 WorkspaceInstance 的更新事件
+    处理 DevWorkspace 的更新事件
     """
-    logger.info(f"Updating workspace instance: {name} in namespace {namespace}")
+    logger.info(f"Updating devworkspace: {name} in namespace {namespace}")
     
-    # 获取当前状态
-    current_phase = status.get('phase')
-    if current_phase == "Failed":
+    if status.get('phase') == "Failed":
         logger.info(f"Instance {name} is in Failed state, skipping update")
         return
-    
-    # 获取模板引用
-    template_ref = spec.get('templateRef')
-    if not template_ref:
-        return {"status": {"phase": "Failed", "message": "No templateRef specified"}}
-    
-    # 获取模板
-    template = get_workspace_template(template_ref)
-    if not template:
-        return {"status": {"phase": "Failed", "message": f"Template {template_ref} not found"}}
-    
-    # 合并配置
-    template_spec = template.get('spec', {})
-    overrides = spec.get('overrides', {})
-    config = merge_configs(template_spec, overrides)
-    
-    # 获取配置参数
-    image = config.get('environment', {}).get('image')
-    if not image:
-        return {"status": {"phase": "Failed", "message": "No image specified in template"}}
-    
-    resources = config.get('resources', {})
-    storage_size = config.get('storage', {}).get('size', '10Gi')
-    ports = config.get('ports', [])
-    
-    # 获取当前的 Pod、PVC 和 Service
-    pod_name = status.get('podName')
-    pvc_name = status.get('pvcName')
-    service_name = status.get('serviceName')
-    
-    # 如果没有 PVC，创建一个
-    if not pvc_name:
-        pvc_name = create_pvc(name, namespace, storage_size)
-    
-    # 如果没有 Pod，创建一个
-    if not pod_name:
-        pod_name = create_pod(name, namespace, pvc_name, image, resources, ports)
-    
-    # 如果没有 Service，创建一个
-    if not service_name:
-        service_name = create_service(name, namespace, ports)
-    
-    # 获取服务 URL
-    url = get_service_url(service_name, namespace)
-    
-    # Update status
-    final_status = {
-        "phase": "Running",
-        "podName": pod_name,
-        "pvcName": pvc_name,
-        "serviceName": service_name,
-        "url": url
-    }
-    patch_status(name, namespace, final_status)
-    logger.info(f"Workspace instance {name} status updated.")
 
-@kopf.on.delete('devworkspace.kubesphere.io', 'v1alpha1', 'workspaceinstances')
-def delete_workspace_instance(spec, meta, status, name, namespace, logger, **kwargs):
+    config = _get_workspace_config(body.get('spec', {}), logger)
+    if not config:
+        patch_status(name, namespace, {"phase": "Failed", "message": "Failed to get workspace config"})
+        return
+
+    # 检查是否有需要重启 Pod 的变更
+    # 我们只关心镜像和端口的变化，资源和存储的变化暂不处理
+    should_recreate_pod = False
+    for op, field, old, new in diff:
+        if field[:2] == ('spec', 'overrides'):
+             # 简单的处理方式：任何 overrides 的变化都触发重建
+            logger.info(f"Detected change in overrides at {field}. Recreating Pod and Service.")
+            should_recreate_pod = True
+            break
+
+    if should_recreate_pod:
+        logger.info(f"Recreating resources for instance {name}")
+        pod_name = status.get('podName')
+        service_name = status.get('serviceName')
+
+        # 1. 删除旧的 Pod 和 Service
+        if pod_name:
+            try:
+                core_v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+                logger.info(f"Deleted Pod: {pod_name}")
+            except ApiException as e:
+                if e.status != 404: logger.error(f"Error deleting Pod {pod_name}: {e}")
+        if service_name:
+            try:
+                core_v1.delete_namespaced_service(name=service_name, namespace=namespace)
+                logger.info(f"Deleted Service: {service_name}")
+            except ApiException as e:
+                if e.status != 404: logger.error(f"Error deleting Service {service_name}: {e}")
+
+        # 2. 创建新的 Pod 和 Service
+        try:
+            image = config.get('environment', {}).get('image')
+            resources = config.get('resources', {})
+            ports = config.get('ports', [])
+            pvc_name = status.get('pvcName') # PVC 不应重新创建
+
+            if not pvc_name:
+                 raise kopf.PermanentError("Cannot recreate Pod without a PVC name in status.")
+
+            new_pod_name = create_pod(name, namespace, pvc_name, image, resources, ports)
+            new_service_name = create_service(name, namespace, ports)
+
+            wait_for_pod_running(new_pod_name, namespace, logger)
+            url = get_service_url(new_service_name, namespace)
+
+            final_status = {
+                "phase": "Running",
+                "message": "Workspace is updated",
+                "podName": new_pod_name,
+                "pvcName": pvc_name,
+                "serviceName": new_service_name,
+                "url": url
+            }
+            patch_status(name, namespace, final_status)
+            logger.info(f"Workspace instance {name} has been updated and is running at {url}")
+
+        except Exception as e:
+            logger.error(f"Failed to update devworkspace {name}: {e}", exc_info=True)
+            message = f"An unexpected error occurred during update: {e}"
+            patch_status(name, namespace, {"phase": "Failed", "message": message})
+    else:
+        logger.info(f"No significant changes detected for {name}. Skipping resource recreation.")
+
+@kopf.on.delete(DEV_WORKSPACE_KIND.lower() + "s", group=API_GROUP, version=API_VERSION)
+def delete_workspace_instance(name: str, namespace: str, status: Dict[str, Any], logger: logging.Logger, **kwargs):
     """
-    处理 WorkspaceInstance 的删除事件
+    处理 DevWorkspace 的删除事件
     """
-    logger.info(f"Deleting workspace instance: {name} in namespace {namespace}")
+    logger.info(f"Deleting devworkspace: {name} in namespace {namespace}")
     
-    # 如果 status 为空，说明实例可能从未成功创建，直接返回
     if not status:
         logger.warning(f"Workspace instance {name} has no status, nothing to delete.")
         return
@@ -535,14 +543,14 @@ def delete_workspace_instance(spec, meta, status, name, namespace, logger, **kwa
 
 def patch_status(name: str, namespace: str, status: Dict[str, Any]):
     """
-    通过 patch 方法更新 WorkspaceInstance 的状态
+    通过 patch 方法更新 DevWorkspace 的状态
     """
     try:
         custom_api.patch_namespaced_custom_object_status(
             group=API_GROUP,
             version=API_VERSION,
             namespace=namespace,
-            plural="workspaceinstances",
+            plural=DEV_WORKSPACE_KIND.lower() + "s",
             name=name,
             body={"status": status}
         )
@@ -558,13 +566,19 @@ def wait_for_pod_running(pod_name: str, namespace: str, logger):
     for i in range(retries):
         try:
             pod = core_v1.read_namespaced_pod(name=pod_name, namespace=namespace)
-            if pod.status.phase == 'Running':
-                logger.info(f"Pod {pod_name} is running.")
-                return
-            elif pod.status.phase == 'Failed' or pod.status.phase == 'Unknown':
-                 raise kopf.PermanentError(f"Pod {pod_name} entered {pod.status.phase} state.")
+            # 使用类型检查和安全访问
+            if pod and isinstance(pod, client.V1Pod):
+                if pod.status and pod.status.phase == 'Running':
+                    logger.info(f"Pod {pod_name} is running.")
+                    return
+                elif pod.status and (pod.status.phase == 'Failed' or pod.status.phase == 'Unknown'):
+                    raise kopf.PermanentError(f"Pod {pod_name} entered {pod.status.phase} state.")
+                else:
+                    phase = pod.status.phase if pod.status else "Unknown"
+                    logger.info(f"Pod {pod_name} is in {phase} phase. Waiting...")
+                    time.sleep(delay)
             else:
-                logger.info(f"Pod {pod_name} is in {pod.status.phase} phase. Waiting...")
+                logger.info(f"Pod {pod_name} is not properly initialized. Waiting...")
                 time.sleep(delay)
         except ApiException as e:
             logger.error(f"Error reading pod status for {pod_name}: {e}")
@@ -577,6 +591,8 @@ def main():
     主函数
     """
     logger.info("Starting KubeSphere DevWorkspace Operator")
-    kopf.run()
+    # 明确以 cluster-wide 模式运行，以解决 FutureWarning
+    kopf.run(clusterwide=True)
+
 if __name__ == "__main__":
     main() 

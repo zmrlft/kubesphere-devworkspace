@@ -1,5 +1,5 @@
 apiVersion: devworkspace.kubesphere.io/v1alpha1
-kind: WorkspaceInstance
+kind: DevWorkspace
 metadata:
   name: my-nodejs-workspace
   namespace: default

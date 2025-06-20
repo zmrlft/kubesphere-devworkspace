@@ -1,5 +1,5 @@
 apiVersion: devworkspace.kubesphere.io/v1alpha1
-kind: WorkspaceTemplate
+kind: DevWorkspaceTemplate
 metadata:
   name: nodejs-16
 spec:

@@ -38,25 +38,25 @@ cd devworkspace
 1. 查看可用的工作空间模板：
 
 ```bash
-kubectl get workspacetemplates
+kubectl get devworkspacetemplates
 ```
 
 2. 创建工作空间实例：
 
 ```bash
-kubectl apply -f crds/examples/workspace-instance.yaml
+kubectl apply -f crds/examples/devworkspace.yaml
 ```
 
 3. 查看工作空间实例状态：
 
 ```bash
-kubectl get workspaceinstances
+kubectl get devworkspaces
 ```
 
 4. 获取访问 URL：
 
 ```bash
-kubectl get workspaceinstances my-nodejs-workspace -o jsonpath='{.status.url}'
+kubectl get devworkspace my-nodejs-workspace -o jsonpath='{.status.url}'
 ```
 
 ## 项目结构
@@ -64,8 +64,8 @@ kubectl get workspaceinstances my-nodejs-workspace -o jsonpath='{.status.url}'
 ```
 kubesphere-devworkspace/
 ├── crds/                      # CRD 定义文件
-│   ├── workspace_template_crd.yaml
-│   ├── workspace_instance_crd.yaml
+│   ├── devworkspacetemplate_crd.yaml
+│   ├── devworkspace_crd.yaml
 │   └── examples/              # 示例 CR 文件
 ├── operator/                  # Operator 代码
 │   ├── src/

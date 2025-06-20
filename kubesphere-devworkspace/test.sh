@@ -8,17 +8,17 @@ echo "===== KubeSphere DevWorkspace 测试脚本 ====="
 
 # 1. 安装 CRD
 echo "1. 安装 CRD..."
-kubectl apply -f crds/workspace_template_crd.yaml
-kubectl apply -f crds/workspace_instance_crd.yaml
+kubectl apply -f crds/devworkspacetemplate_crd.yaml
+kubectl apply -f crds/devworkspace_crd.yaml
 
 # 等待 CRD 就绪
 echo "等待 CRD 就绪..."
-sleep 10
+sleep 5
 
 # 2. 验证 CRD 安装
 echo "2. 验证 CRD 安装..."
-kubectl get crd workspacetemplates.devworkspace.kubesphere.io
-kubectl get crd workspaceinstances.devworkspace.kubesphere.io
+kubectl get crd devworkspacetemplates.devworkspace.kubesphere.io
+kubectl get crd devworkspaces.devworkspace.kubesphere.io
 
 # 3. 创建示例模板
 echo "3. 创建示例模板..."
@@ -27,7 +27,7 @@ kubectl apply -f crds/examples/python-template.yaml
 
 # 4. 验证模板创建
 echo "4. 验证模板创建..."
-kubectl get workspacetemplates
+kubectl get devworkspacetemplates
 
 # 5. 安装 RBAC
 echo "5. 安装 RBAC..."
@@ -41,27 +41,27 @@ echo "按回车键继续..."
 read
 
 # 7. 创建工作空间实例
-echo "7. 创建工作空间实例..."
-kubectl apply -f crds/examples/workspace-instance.yaml
+echo "7. 创建 DevWorkspace 实例..."
+kubectl apply -f crds/examples/devworkspace.yaml
 
 # 8. 验证工作空间实例创建
-echo "8. 验证工作空间实例创建..."
-echo "等待工作空间实例就绪..."
+echo "8. 验证 DevWorkspace 实例创建..."
+echo "等待 DevWorkspace 实例就绪..."
 sleep 10
-kubectl get workspaceinstances
+kubectl get devworkspaces
 
 # 9. 验证资源创建
 echo "9. 验证资源创建..."
 echo "Pod:"
-kubectl get pods | grep my-nodejs-workspace
+kubectl get pods -l app=devworkspace,instance=my-nodejs-workspace
 echo "PVC:"
-kubectl get pvc | grep my-nodejs-workspace
+kubectl get pvc -l app=devworkspace,instance=my-nodejs-workspace
 echo "Service:"
-kubectl get svc | grep my-nodejs-workspace
+kubectl get svc -l app=devworkspace,instance=my-nodejs-workspace
 
 # 10. 获取访问 URL
 echo "10. 获取访问 URL..."
-URL=$(kubectl get workspaceinstances my-nodejs-workspace -o jsonpath='{.status.url}')
+URL=$(kubectl get devworkspace my-nodejs-workspace -o jsonpath='{.status.url}')
 echo "工作空间访问 URL: $URL"
 
 echo "如果您在本地集群上运行，可能需要使用端口转发来访问工作空间："
