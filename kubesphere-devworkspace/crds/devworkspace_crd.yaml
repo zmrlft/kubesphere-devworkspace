@@ -65,6 +65,22 @@ spec:
                         size:
                           type: string
                           pattern: '^[0-9]+(Gi|Mi|Ki|G|M|K)?$'
+                    ports:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          containerPort:
+                            type: integer
+                          protocol:
+                            type: string
+                    environment:
+                      type: object
+                      properties:
+                        image:
+                          type: string
             status:
               type: object
               properties:

@@ -209,6 +209,11 @@ def create_pod(
     """
     pod_name = f"{instance_name}"
     
+    # 确定容器监听的端口，默认为 8080
+    container_listen_port = 8080
+    if ports and ports[0].get('containerPort'):
+        container_listen_port = ports[0]['containerPort']
+
     container_ports = []
     if ports:
         for port in ports:
@@ -239,7 +244,14 @@ def create_pod(
                     "mountPath": "/workspace"
                 }],
                 "resources": resources,
-                "command": ["code-server", "--bind-addr", "0.0.0.0:8080", "--auth", "none", "/workspace"]
+                "command": [
+                    "code-server",
+                    "--bind-addr",
+                    f"0.0.0.0:{container_listen_port}",
+                    "--auth",
+                    "none",
+                    "/workspace"
+                ]
             }],
             "volumes": [{
                 "name": "workspace-storage",
@@ -453,13 +465,20 @@ def update_workspace_instance(body: Dict[str, Any], name: str, namespace: str, s
         patch_status(name, namespace, {"phase": "Failed", "message": "Failed to get workspace config"})
         return
 
-    # 检查是否有需要重启 Pod 的变更
-    # 我们只关心镜像和端口的变化，资源和存储的变化暂不处理
+    # 定义需要重启 Pod 的变更字段路径
+    # Pod 的 image, ports, resources, 和引用的 template 都是不可变或需要重建的
+    restart_trigger_paths = [
+        ('spec', 'templateRef'),
+        ('spec', 'overrides', 'ports'),
+        ('spec', 'overrides', 'environment'), # 任何环境变化都重启
+        ('spec', 'overrides', 'resources'),
+    ]
+
     should_recreate_pod = False
-    for op, field, old, new in diff:
-        if field[:2] == ('spec', 'overrides'):
-             # 简单的处理方式：任何 overrides 的变化都触发重建
-            logger.info(f"Detected change in overrides at {field}. Recreating Pod and Service.")
+    for op, path, old, new in diff:
+        # 检查变更的字段路径是否以任何一个触发路径开头
+        if any(path[:len(trigger)] == trigger for trigger in restart_trigger_paths):
+            logger.info(f"Detected change in a critical field: {path}. Recreation is required.")
             should_recreate_pod = True
             break
 
@@ -468,19 +487,26 @@ def update_workspace_instance(body: Dict[str, Any], name: str, namespace: str, s
         pod_name = status.get('podName')
         service_name = status.get('serviceName')
 
-        # 1. 删除旧的 Pod 和 Service
-        if pod_name:
-            try:
-                core_v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
-                logger.info(f"Deleted Pod: {pod_name}")
-            except ApiException as e:
-                if e.status != 404: logger.error(f"Error deleting Pod {pod_name}: {e}")
+        # 1. 删除旧的 Pod 和 Service (先删除 Service，再删除 Pod)
         if service_name:
             try:
                 core_v1.delete_namespaced_service(name=service_name, namespace=namespace)
+                # 等待 Service 被彻底删除
+                wait_for_service_deletion(service_name, namespace, logger)
                 logger.info(f"Deleted Service: {service_name}")
+                
             except ApiException as e:
                 if e.status != 404: logger.error(f"Error deleting Service {service_name}: {e}")
+        
+        if pod_name:
+            try:
+                core_v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+                # 等待 Pod 被彻底删除
+                wait_for_pod_deletion(pod_name, namespace, logger)
+                logger.info(f"Deleted Pod: {pod_name}")
+                
+            except ApiException as e:
+                if e.status != 404: logger.error(f"Error deleting Pod {pod_name}: {e}")
 
         # 2. 创建新的 Pod 和 Service
         try:
@@ -539,7 +565,10 @@ def delete_workspace_instance(name: str, namespace: str, status: Dict[str, Any],
                 name=pod_name,
                 namespace=namespace
             )
+            # 等待 Pod 被彻底删除
+            wait_for_pod_deletion(pod_name, namespace, logger)
             logger.info(f"Deleted Pod: {pod_name}")
+            
         except ApiException as e:
             if e.status != 404:  # 忽略 "Not Found" 错误
                 logger.error(f"Error deleting Pod {pod_name}: {e}")
@@ -551,6 +580,8 @@ def delete_workspace_instance(name: str, namespace: str, status: Dict[str, Any],
                 name=service_name,
                 namespace=namespace
             )
+            # 等待 Service 被彻底删除
+            wait_for_service_deletion(service_name, namespace, logger)
             logger.info(f"Deleted Service: {service_name}")
         except ApiException as e:
             if e.status != 404:  # 忽略 "Not Found" 错误
@@ -615,6 +646,48 @@ def wait_for_pod_running(pod_name: str, namespace: str, logger):
             time.sleep(delay)
     
     raise kopf.TemporaryError(f"Pod {pod_name} did not become ready in time.", delay=60)
+
+def wait_for_pod_deletion(pod_name: str, namespace: str, logger: logging.Logger):
+    """
+    等待 Pod 被彻底删除
+    """
+    retries = 30  # 30 * 5s = 2.5 minutes timeout
+    delay = 5
+    logger.info(f"Waiting for Pod {pod_name} to be deleted...")
+    for _ in range(retries):
+        try:
+            core_v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+            logger.info(f"Pod {pod_name} still exists. Waiting...")
+            time.sleep(delay)
+        except ApiException as e:
+            if e.status == 404:
+                logger.info(f"Pod {pod_name} has been deleted.")
+                return
+            else:
+                logger.error(f"Error while waiting for pod deletion: {e}")
+                time.sleep(delay)  # retry on other errors too
+    raise kopf.TemporaryError(f"Pod {pod_name} was not deleted in time.")
+
+def wait_for_service_deletion(service_name: str, namespace: str, logger: logging.Logger):
+    """
+    等待 Service 被彻底删除
+    """
+    retries = 30  # 30 * 5s = 2.5 minutes timeout
+    delay = 5
+    logger.info(f"Waiting for Service {service_name} to be deleted...")
+    for _ in range(retries):
+        try:
+            core_v1.read_namespaced_service(name=service_name, namespace=namespace)
+            logger.info(f"Service {service_name} still exists. Waiting...")
+            time.sleep(delay)
+        except ApiException as e:
+            if e.status == 404:
+                logger.info(f"Service {service_name} has been deleted.")
+                return
+            else:
+                logger.error(f"Error while waiting for service deletion: {e}")
+                time.sleep(delay)  # retry on other errors too
+    raise kopf.TemporaryError(f"Service {service_name} was not deleted in time.")
 
 def main():
     """
