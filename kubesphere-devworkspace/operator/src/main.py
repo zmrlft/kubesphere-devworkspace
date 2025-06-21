@@ -127,6 +127,16 @@ def merge_configs(template_spec: Dict[str, Any], overrides: Dict[str, Any]) -> D
     elif 'storage' in overrides:
         result['storage'] = overrides['storage']
     
+    # 处理环境覆盖
+    if 'environment' in overrides and 'environment' in result:
+        result['environment'].update(overrides['environment'])
+    elif 'environment' in overrides:
+        result['environment'] = overrides['environment']
+        
+    # 处理端口覆盖 (完全替换)
+    if 'ports' in overrides:
+        result['ports'] = overrides['ports']
+    
     return result
 
 def create_pvc(instance_name: str, namespace: str, storage_size: str) -> str:
