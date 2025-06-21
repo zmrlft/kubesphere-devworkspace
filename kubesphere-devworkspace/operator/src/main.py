@@ -121,7 +121,7 @@ def create_pvc(instance_name: str, namespace: str, storage_size: str) -> str:
     Returns:
         创建的 PVC 的名称
     """
-    pvc_name = f"{instance_name}-workspacePVC"
+    pvc_name = f"{instance_name}-pvc"
     
     pvc_manifest = {
         "apiVersion": "v1",
