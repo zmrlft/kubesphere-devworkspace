@@ -12,6 +12,7 @@ KubeSphere DevWorkspace Operator
 
 import kopf
 import logging
+import logging.handlers
 
 import time
 from kubernetes import client, config
@@ -21,7 +22,26 @@ from typing import Dict, Any, Optional, cast
 
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+# 定义日志格式，包含时间戳、日志名称、日志级别和消息
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+# 配置 logging 模块
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_FORMAT,
+    handlers=[
+        # 添加一个轮转文件 handler，将日志写入 operator.log 文件
+        # 当文件达到 10MB 时会自动轮转，最多保留 5 个备份文件
+        logging.handlers.RotatingFileHandler(
+            'operator.log',
+            maxBytes=10*1024*1024, # 10 MB
+            backupCount=5
+        ),
+        # 同时保留控制台输出
+        logging.StreamHandler()
+    ]
+)
+
 logger = logging.getLogger("devworkspace-operator")
 
 # 尝试加载 Kubernetes 配置
