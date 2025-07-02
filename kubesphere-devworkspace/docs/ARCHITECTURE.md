@@ -117,13 +117,13 @@ WorkspaceInstance ───► ├── PVC (Persistent Volume Claim)
 
 工作空间使用的容器镜像包含了 VS Code Server 和相应的开发工具。在本项目中，我们使用了 `codercom/code-server` 作为基础镜像，它已经包含了 VS Code Server。
 
-在实际生产环境中，您可能需要构建自己的镜像，添加特定的语言运行时和工具。
+在实际生产环境中，可能需要构建自己的镜像，添加特定的语言运行时和工具(这个暂未完成)
 
 ## 4. 扩展点
 
 ### 4.1 支持更多的工作空间类型
 
-您可以通过创建更多的 WorkspaceTemplate 资源来支持不同类型的开发环境，例如：
+可以通过创建更多的 WorkspaceTemplate 资源来支持不同类型的开发环境，例如：
 
 - Java 开发环境
 - Go 开发环境
@@ -135,8 +135,4 @@ WorkspaceInstance ───► ├── PVC (Persistent Volume Claim)
 
 ### 4.3 用户认证
 
-当前实现中，VS Code Server 没有启用认证。在生产环境中，您应该考虑添加认证机制，例如：
-
-- 使用 VS Code Server 的内置认证
-- 使用 Kubernetes 的身份验证代理
-- 集成 OAuth2 提供商 
+当前实现中，VS Code Server 没有启用认证。由于集成到了kubesphere,直接使用kubesphere现有的认证机制，目前我不考虑添加额外的认证机制

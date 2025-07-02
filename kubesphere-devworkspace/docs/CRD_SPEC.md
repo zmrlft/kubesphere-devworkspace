@@ -1,6 +1,6 @@
 # KubeSphere DevWorkspace CRD 规范
 
-本文档详细说明了 KubeSphere DevWorkspace 中使用的两个 CRD 的规范。
+本文档详细说明了 KubeSphere DevWorkspace 中使用的两个 CRD 的规范，如果有对不上的麻烦您报告给我，有时候代码改完会忘记更新doc。
 
 ## WorkspaceTemplate
 

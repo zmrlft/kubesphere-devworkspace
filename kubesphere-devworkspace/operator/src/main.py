@@ -2,10 +2,10 @@
 """
 KubeSphere DevWorkspace Operator
 
-该 Operator 负责监听 WorkspaceInstance 资源的创建、更新和删除事件，
-并根据引用的 WorkspaceTemplate 创建相应的 Pod、PVC 和 Service 资源。
+该 Operator 负责监听 DevWorkspace 资源的创建、更新和删除事件，
+并根据引用的 DevWorkspaceTemplate 创建相应的 Pod、PVC 和 Service 资源。
 
-注意: 本文件中的 kopf 处理函数使用 **kwargs 参数形式，这可能导致 linter 报告类型检查错误。
+注意: 本文件中的 kopf 处理函数使用 **kwargs 参数形式，这可能导致 linter(pylint) 报告类型检查错误。
 这些错误可以被忽略，因为实际运行时 kopf 1.35.6 会正确传递所需的参数。
 """
 
